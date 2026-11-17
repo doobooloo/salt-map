@@ -16,20 +16,12 @@
     <button id="toggle" aria-label="Show or hide details">☰</button>
   </header>
   <div id="body">
-    <p class="lead">Which interstates have been salted or brined, from live state DOT plow feeds.</p>
-    <label class="win">Show treatment from the last
-      <select id="window">
-        <option value="6">6 hours</option>
-        <option value="12">12 hours</option>
-        <option value="24">24 hours</option>
-        <option value="48" selected>48 hours</option>
-      </select>
-    </label>
+    <p class="lead">Which interstates have had their first salt of the season, recorded from state DOT plow feeds.</p>
     <ul id="legend"></ul>
-    <p id="note" hidden>No trucks are spreading material right now, so states that report show as untreated. That is expected outside of a storm.</p>
+    <p id="since" class="fine"></p>
     <h2>States reporting</h2>
     <div id="states"></div>
-    <p class="fine">Every other state is grey because it does not publish plow or spreader data this map can read. Dots are individual plow trucks. A stretch counts as treated when a truck reported spreading salt or brine on it; it says nothing about how much is still on the road.</p>
+    <p class="fine">A stretch turns blue the first time a truck reports spreading salt or brine on it, and stays blue for the rest of the season. Every other state is grey because it does not publish spreader data this map can read. Dots are plow trucks out right now.</p>
     <p id="updated" class="fine">Loading…</p>
   </div>
 </aside>

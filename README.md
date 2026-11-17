@@ -18,12 +18,19 @@ labelled simulated storm (useful when no plows are out).
 
 | Colour | Meaning |
 | --- | --- |
-| Blue | A truck reported applying salt/brine on this stretch within the chosen time window |
-| Amber | A plow truck was on this stretch but reported no material |
-| Red | The state reports material use, and nothing was reported here |
-| Grey | The state publishes no feed this map can read (or positions only) |
+| Blue | Salted this season: a truck has reported applying salt/brine here at least once |
+| Red | Not salted yet, in a state that reports material use |
+| Grey | The state publishes no feed this map can read (or plow positions only) |
 
-Dots are individual plow trucks. Click any road or truck for details.
+Dots are plow trucks out right now. Click any road or truck for details.
+
+## How the season record works
+
+State feeds only look back a day or two, so `scripts/update_season.mjs` runs
+every 30 minutes (`.github/workflows/season.yml`), and the first time a stretch
+is reported salted it is written to `data/season.json`. It stays there until
+the season resets on 1 October. Salting that happened before the recorder
+started is not known.
 
 ## Data
 
@@ -53,4 +60,8 @@ actually reports salt/brine application.
   much material is still on the pavement.
 - Feed geometry is matched to interstates by distance (500 m), so a truck on an
   overpass or adjacent ramp can briefly colour the interstate beneath it.
-- Outside of a winter storm the reporting states will show as untreated.
+- The season record only covers the period the recorder has been running.
+
+## Hosting
+
+The site is served by GitHub Pages at `salt.constantforce.com` (see `CNAME`).
