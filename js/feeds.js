@@ -166,6 +166,68 @@ export const FEEDS = [
   carsFeed({ state: 'KS', agency: 'KDOT', host: 'kstg.carsprogram.org', site: 'https://www.kandrive.gov' }),
   carsFeed({ state: 'NE', agency: 'Nebraska DOT', host: 'netg.carsprogram.org', site: 'https://new.511.nebraska.gov' }),
   carsFeed({ state: 'MN', agency: 'MnDOT', host: 'mntg.carsprogram.org', site: 'https://511mn.org', material: false }),
+  {
+    id: 'ky-segments',
+    state: 'KY',
+    kind: 'segments',
+    material: true,
+    name: 'Kentucky KYTC – Snow and ice treated roads',
+    about: 'Road segments with the last time they were treated or pre-treated.',
+    link: 'https://www.arcgis.com/home/search.html?q=SNICTreatedRoads_2020',
+    async load() {
+      const feats = await arcgisQuery('https://services2.arcgis.com/CcI36Pduqd0OR4W9/arcgis/rest/services/SNICTreatedRoads_2020/FeatureServer/0', {
+        where: "kytcRtPrefix='I' AND (TreatmentLastDate IS NOT NULL OR PreTreatmentLastDate IS NOT NULL)",
+        outFields: 'kytcRoute,TreatmentLastDate,PreTreatmentLastDate',
+        maxAllowableOffset: '0.0005',
+        geometryPrecision: '4',
+      }, 10);
+      return feats.filter((f) => f.geometry && f.geometry.paths).map((f) => {
+        const a = f.attributes;
+        const pre = (a.PreTreatmentLastDate || 0) > (a.TreatmentLastDate || 0);
+        return { paths: f.geometry.paths, status: 'treated', time: Math.max(a.TreatmentLastDate || 0, a.PreTreatmentLastDate || 0) || null,
+          detail: `${a.kytcRoute || ''} ${pre ? 'pre-treated' : 'treated'}`.trim() };
+      });
+    },
+  },
+  {
+    id: 'ky-trucks',
+    state: 'KY',
+    kind: 'trucks',
+    material: false, // the rate fields read non-zero on parked trucks, so they are not trusted here
+    name: 'Kentucky KYTC – Truck locations (live)',
+    about: 'Live truck positions.',
+    link: 'https://www.arcgis.com/home/search.html?q=avl_2020%20KYTC',
+    async load() {
+      const feats = await arcgisQuery('https://services2.arcgis.com/CcI36Pduqd0OR4W9/arcgis/rest/services/avl_2020/FeatureServer/0', {
+        where: 'avlSpeed > 5',
+        outFields: 'avlVehicleName,avlDatestamp,avlSpeed,kytcRouteLbl',
+        orderByFields: 'avlDatestamp DESC',
+        resultRecordCount: '300',
+      }, 1);
+      const cutoff = Date.now() - HOUR;
+      return feats.filter((f) => f.geometry && f.attributes.avlDatestamp > cutoff).map((f) => ({
+        lon: f.geometry.x, lat: f.geometry.y, time: f.attributes.avlDatestamp, applying: null,
+        label: `KYTC truck ${f.attributes.avlVehicleName || ''}`.trim(),
+        detail: `Moving at ${Math.round(f.attributes.avlSpeed)} mph${f.attributes.kytcRouteLbl ? ` on ${f.attributes.kytcRouteLbl}` : ''} – material not reported`,
+      }));
+    },
+  },
+  {
+    id: 'md-trucks',
+    state: 'MD',
+    kind: 'trucks',
+    material: false,
+    name: 'Maryland MDOT SHA – STORM plow locations (live)',
+    about: 'Live plow positions (5 minute delay). Material is not reported.',
+    link: 'https://storm.sha.maryland.gov',
+    async load() {
+      const feats = await arcgisQuery('https://app-storm-sha-prod.azurewebsites.net/koop/avllocation/rest/services/0/FeatureServer/0', { outFields: '*' }, 1);
+      return feats.filter((f) => f.attributes.lat && f.attributes.lon).map((f) => ({
+        lon: f.attributes.lon, lat: f.attributes.lat, time: f.attributes.dateStamp || null, applying: null,
+        label: 'MDOT SHA plow', detail: 'Material not reported',
+      }));
+    },
+  },
 ];
 
 export const STATE_NAMES = {
