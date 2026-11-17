@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Salt Map – US interstate winter treatment</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+<div id="demo" hidden>DEMO – simulated storm, not real data</div>
+<aside id="panel">
+  <header>
+    <h1>Salt Map</h1>
+    <button id="toggle" aria-label="Show or hide details">☰</button>
+  </header>
+  <div id="body">
+    <p class="lead">Which interstates have been salted or brined, from live state DOT plow feeds.</p>
+    <label class="win">Show treatment from the last
+      <select id="window">
+        <option value="6">6 hours</option>
+        <option value="12">12 hours</option>
+        <option value="24">24 hours</option>
+        <option value="48" selected>48 hours</option>
+      </select>
+    </label>
+    <ul id="legend"></ul>
+    <p id="note" hidden>No trucks are spreading material right now, so states that report show as untreated. That is expected outside of a storm.</p>
+    <h2>States reporting</h2>
+    <div id="states"></div>
+    <p class="fine">Every other state is grey because it does not publish plow or spreader data this map can read. Dots are individual plow trucks. A stretch counts as treated when a truck reported spreading salt or brine on it; it says nothing about how much is still on the road.</p>
+    <p id="updated" class="fine">Loading…</p>
+  </div>
+</aside>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
