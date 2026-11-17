@@ -2,7 +2,8 @@
 //
 // Each feed turns a state's own data into one of two normalized shapes:
 //   segments: [{ paths: [[[lon,lat],...],...], status: 'treated'|'plowed', time: ms, detail: string }]
-//   trucks:   [{ lon, lat, time: ms, applying: true|false|null, label, detail }]
+//   trucks:   [{ lon, lat, time: ms, applying: true|false|null, label, detail, route?, trail? }]
+// `route` (e.g. "I-70") restricts matching to that road; `trail: true` marks an older breadcrumb.
 // `applying: null` means the feed does not say whether material is going down.
 //
 // To add a state: append an entry here. `material: true` means the feed reports
@@ -33,6 +34,46 @@ const fmt = (n, unit) => (n > 0 ? `${Math.round(n).toLocaleString()} ${unit}` : 
 
 const IOWA = 'https://services.arcgis.com/8lRhdTsQyJpO52F1/arcgis/rest/services';
 const UTAH = 'https://services.arcgis.com/pA2nEVnB6tquxgOW/arcgis/rest/services';
+
+// Castle Rock "CARS" 511 platform: per-truck breadcrumb trails, shared by several states.
+// The material being spread is only encoded in the icon name (None_ / Solid_ / Liquid_ ...).
+function carsFeed({ state, agency, host, site, material = true }) {
+  return {
+    id: `${state.toLowerCase()}-cars`,
+    state,
+    kind: 'trucks',
+    material,
+    name: `${agency} – 511 plow locations (live)`,
+    about: material ? 'Plow trails with the material each truck is spreading.' : 'Plow positions only; material is not reported.',
+    link: site,
+    async load() {
+      const res = await fetch(`https://${host}/avl_v2/api/plows`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const trucks = await res.json();
+      const out = [];
+      for (const t of trucks) {
+        if (String(t.id).endsWith('-i') && material) continue; // plow-camera duplicate of a truck
+        (t.statuses || []).forEach((st, i) => {
+          if (st.latitude == null || st.longitude == null) return;
+          const mat = st.plowIconName ? st.plowIconName.replace(/^\//, '').split('_')[0] : null;
+          const applying = !material || mat == null ? null : mat.toLowerCase() !== 'none';
+          out.push({
+            lon: st.longitude,
+            lat: st.latitude,
+            time: st.timestamp || null,
+            applying,
+            route: st.routeDesignator || null,
+            trail: i > 0,
+            label: `${agency} plow ${st.vehicleName || t.id}`.replace(/-i$/, ''),
+            detail: (applying == null ? 'Material not reported' : applying ? `Applying ${mat.toLowerCase()} material` : 'Not applying material')
+              + (st.routeDesignator ? ` on ${st.routeDesignator}` : ''),
+          });
+        });
+      }
+      return out;
+    },
+  };
+}
 
 export const FEEDS = [
   {
@@ -121,6 +162,10 @@ export const FEEDS = [
         }));
     },
   },
+  carsFeed({ state: 'IN', agency: 'INDOT', host: 'intg.carsprogram.org', site: 'https://511in.org' }),
+  carsFeed({ state: 'KS', agency: 'KDOT', host: 'kstg.carsprogram.org', site: 'https://www.kandrive.gov' }),
+  carsFeed({ state: 'NE', agency: 'Nebraska DOT', host: 'netg.carsprogram.org', site: 'https://new.511.nebraska.gov' }),
+  carsFeed({ state: 'MN', agency: 'MnDOT', host: 'mntg.carsprogram.org', site: 'https://511mn.org', material: false }),
 ];
 
 export const STATE_NAMES = {

@@ -101,6 +101,7 @@ function applyResults(results) {
   for (const r of results) {
     if (!r.ok || r.feed.kind !== 'trucks') continue;
     for (const t of r.items) {
+      if (t.trail) continue;
       const fresh = t.time && Date.now() - t.time <= TRUCK_FRESH_MS;
       const color = !fresh ? '#9aa3ad' : t.applying ? STATUS.salted.color : '#e0a100';
       L.circleMarker([t.lat, t.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 1, pane: 'markerPane' })
@@ -112,6 +113,7 @@ function applyResults(results) {
 }
 
 // ---------- panel ----------
+const count = (r) => r.items.filter((t) => !t.trail).length;
 function renderPanel(results) {
   const tot = { salted: 0, unsalted: 0, nodata: 0 };
   for (const c of chunks) tot[c.status] += c.len;
@@ -132,7 +134,7 @@ function renderPanel(results) {
     return `<div class="state"><button data-state="${st}" title="Zoom to ${STATE_NAMES[st]}">${STATE_NAMES[st]}</button>
       <div class="bar">${bar}</div><div class="sum">${summary}</div>
       ${feeds.map((r) => `<div class="feed ${r.ok ? 'ok' : 'err'}"><a href="${r.feed.link}" target="_blank" rel="noopener">${esc(r.feed.name)}</a>
-        <span>${r.ok ? `${r.items.length.toLocaleString()} ${r.feed.kind === 'trucks' ? 'active truck' : 'active segment'}${r.items.length === 1 ? '' : 's'}` : `failed: ${esc(r.error)}`}</span></div>`).join('')}</div>`;
+        <span>${r.ok ? `${count(r).toLocaleString()} ${r.feed.kind === 'trucks' ? 'truck' : 'treated segment'}${count(r) === 1 ? '' : 's'} now` : `failed: ${esc(r.error)}`}</span></div>`).join('')}</div>`;
   }).join('');
   $('states').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => zoomTo(b.dataset.state)));
 

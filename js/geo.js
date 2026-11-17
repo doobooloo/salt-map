@@ -4,7 +4,8 @@ const R = 6371000, RAD = Math.PI / 180;
 export const MATCH_M = 500;   // how close feed geometry must be to a road to count
 export const SAMPLE_M = 400;  // spacing of sample points along roads
 export const COVER = 0.5;     // share of a chunk a feed segment must cover
-export const TRUCK_FRESH_MS = 45 * 60e3;
+export const TRUCK_FRESH_MS = 45 * 60e3; // older positions are drawn as stale
+const RECENT_MS = 72 * 3600e3;            // ignore reports older than this (stale rows left in a feed)
 
 export function dist(a, b) {
   const x = (b[0] - a[0]) * RAD * Math.cos(((a[1] + b[1]) / 2) * RAD);
@@ -87,9 +88,15 @@ export function saltedChunks(chunks, results, now = Date.now()) {
       const grid = new Grid();
       for (const c of stateChunks) for (const pt of samplesOf(c)) grid.add(pt, c);
       for (const t of r.items) {
-        if (!t.applying || !t.time || now - t.time > TRUCK_FRESH_MS) continue;
+        if (!t.applying || !t.time || now - t.time > RECENT_MS) continue;
+        let route = null;
+        if (t.route) {
+          const m = /^I-?\s*(\d+[A-Z]?)$/i.exec(t.route.trim());
+          if (!m) continue; // the feed says this truck is on a non-interstate road
+          route = m[1].toUpperCase();
+        }
         const near = new Set();
-        grid.near([t.lon, t.lat], MATCH_M, (c) => near.add(c));
+        grid.near([t.lon, t.lat], MATCH_M, (c) => { if (!route || c.r === route) near.add(c); });
         for (const c of near) mark(c, t.time, `${t.label}: ${t.detail}`, r.feed.name);
       }
     }
