@@ -52,3 +52,15 @@ select { font: inherit; padding: 2px 4px; border: 1px solid var(--line); border-
 }
 
 .basemap { filter: grayscale(1) contrast(.85) brightness(1.08); opacity: .75; }
+
+.city { display: flex; flex-direction: column; padding: 5px 0; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.city button { font: inherit; font-size: 14px; font-weight: 600; border: 0; background: none; padding: 0; cursor: pointer; color: #1f6fe5; text-align: left; }
+.city button:hover { text-decoration: underline; }
+.city .bad { color: #b3261e; }
+.citypin span {
+  display: inline-block; transform: translate(-50%, -50%); white-space: nowrap; cursor: pointer;
+  background: #fff; color: #1c2530; font: 600 11px system-ui, sans-serif; padding: 2px 7px;
+  border: 1.5px solid #1f6fe5; border-radius: 10px; box-shadow: 0 1px 4px rgba(20, 30, 45, .25);
+}
+details { margin-top: 3px; font-size: 12px; color: var(--muted); }
+summary { cursor: pointer; }

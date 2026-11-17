@@ -230,6 +230,72 @@ export const FEEDS = [
   },
 ];
 
+// ---------- city / local street feeds ----------
+// These carry their own street geometry and are drawn only when the map is zoomed to the city.
+// load(sinceMs) -> [{ id, name, paths, status: 'salted'|'serviced'|'none', time, detail }]
+//   salted:   the agency says salt/brine/pre-treatment went down
+//   serviced: a winter operations vehicle pass was logged, salt vs plow not specified
+// `record: true` means the layer is reset between storms, so the season recorder must remember it.
+
+const sqlDate = (ms) => new Date(ms).toISOString().slice(0, 10) + ' 00:00:00';
+const TEST_EVENT = /test|dry.?run|training|drill|demo/i;
+
+// Esri "Winter Weather Operations" solution: streets with the last time a vehicle serviced them.
+function wwoFeed({ id, place, state, center, url, link }) {
+  return {
+    id, place, state, center, link, material: false, record: false,
+    name: `${place} – streets last serviced`,
+    async load(since) {
+      const feats = await arcgisQuery(url, {
+        where: `lastserviced >= TIMESTAMP '${sqlDate(since)}'`,
+        outFields: '*',
+        maxAllowableOffset: '0.00005',
+        geometryPrecision: '5',
+      }, 15);
+      return feats
+        .filter((f) => f.geometry && f.geometry.paths && !TEST_EVENT.test(f.attributes.eventname || ''))
+        .map((f) => {
+          const a = f.attributes;
+          return { id: String(a.snowroutesegmentid || a.OBJECTID || a.objectid), name: a.roadname || 'Street', paths: f.geometry.paths,
+            status: 'serviced', time: a.lastserviced, detail: a.passes ? `${a.passes} vehicle pass${a.passes === 1 ? '' : 'es'}` : '' };
+        });
+    },
+  };
+}
+
+export const LOCAL_FEEDS = [
+  {
+    id: 'cincinnati', place: 'Cincinnati, OH', state: 'OH', center: [39.14, -84.51], material: true, record: true,
+    name: 'Cincinnati – street treatment status',
+    link: 'https://cagisonline.hamilton-co.org/arcgis/rest/services/Cincinnati/PS_Snowplow_Routes/FeatureServer',
+    async load(since) {
+      const feats = await arcgisQuery('https://cagisonline.hamilton-co.org/arcgis/rest/services/Cincinnati/PS_Snowplow_Routes/FeatureServer/1', {
+        outFields: 'SNOWSTREETID,MAPLABEL,STREETSTATUS,STREETDATE',
+        maxAllowableOffset: '0.00005',
+        geometryPrecision: '5',
+      }, 5);
+      return feats.filter((f) => f.geometry && f.geometry.paths).map((f) => {
+        const a = f.attributes;
+        const salted = /salt|pretreat/i.test(a.STREETSTATUS || '') && (a.STREETDATE || 0) >= since;
+        return { id: a.SNOWSTREETID, name: a.MAPLABEL || 'Street', paths: f.geometry.paths,
+          status: salted ? 'salted' : 'none', time: salted ? a.STREETDATE : null, detail: salted ? a.STREETSTATUS : '' };
+      });
+    },
+  },
+  wwoFeed({ id: 'kansas-city', place: 'Kansas City, MO', state: 'MO', center: [39.1, -94.58],
+    url: 'https://services.arcgis.com/4o5uMWTHuOhUVJPd/arcgis/rest/services/Winter_Operations_public_74e8930bc7fb4f2aa30a81bec12d50bc/FeatureServer/0' }),
+  wwoFeed({ id: 'akron', place: 'Akron, OH', state: 'OH', center: [41.08, -81.52],
+    url: 'https://services1.arcgis.com/8roChjXOF0iBhNoB/arcgis/rest/services/Winter_Operations_public_05170e26916845e88589beb76f4c667f/FeatureServer/0' }),
+  wwoFeed({ id: 'portage', place: 'Portage, MI', state: 'MI', center: [42.2, -85.59],
+    url: 'https://services7.arcgis.com/AujU6g0cAkL5JYsn/arcgis/rest/services/Winter_Operations_public_8364b3cb987c4a85bfc6265073e2a647/FeatureServer/0' }),
+  wwoFeed({ id: 'bowling-green', place: 'Bowling Green, OH', state: 'OH', center: [41.375, -83.65],
+    url: 'https://services1.arcgis.com/2guSauYVDQrap3kI/arcgis/rest/services/Winter_Operations_public_e6027c15269544358b4a937dbb4d8879/FeatureServer/0' }),
+  wwoFeed({ id: 'syracuse', place: 'Syracuse, NY', state: 'NY', center: [43.05, -76.15],
+    url: 'https://services6.arcgis.com/bdPqSfflsdgFRVVM/arcgis/rest/services/EventSnowRoutes_dashboard_0eaac62ac5fc4865b58d5ce127f5841f/FeatureServer/0' }),
+  wwoFeed({ id: 'washington-dc', place: 'Washington, DC', state: 'DC', center: [38.9, -77.03],
+    url: 'https://services.arcgis.com/neT9SoYxizqTHZPH/arcgis/rest/services/EventSnowRoutes_dashboard_f01daf9a8523494aaa87a041ce02028f/FeatureServer/0' }),
+];
+
 export const STATE_NAMES = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California', CO: 'Colorado', CT: 'Connecticut',
   DE: 'Delaware', DC: 'District of Columbia', FL: 'Florida', GA: 'Georgia', HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois',

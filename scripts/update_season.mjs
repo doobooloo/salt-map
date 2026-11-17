@@ -3,8 +3,8 @@
 // Run on a schedule (see .github/workflows/season.yml). Once a chunk is in
 // data/season.json it stays there until the next season starts on 1 October.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { FEEDS } from '../js/feeds.js';
-import { saltedChunks, chunkKey, seasonOf } from '../js/geo.js';
+import { FEEDS, LOCAL_FEEDS } from '../js/feeds.js';
+import { saltedChunks, chunkKey, seasonOf, seasonStart } from '../js/geo.js';
 
 const root = new URL('..', import.meta.url);
 const file = new URL('data/season.json', root);
@@ -33,7 +33,22 @@ for (const [c, info] of saltedChunks(chunks, results, now.getTime())) {
     added++;
   }
 }
-console.log(`${added} newly salted chunks, ${Object.keys(season.salted).length} total this season`);
+// City layers that are reset between storms: remember every street seen as salted.
+season.local ||= {};
+for (const feed of LOCAL_FEEDS.filter((f) => f.record)) {
+  try {
+    const seen = (season.local[feed.id] ||= {});
+    for (const it of await feed.load(seasonStart(season.season))) {
+      if (it.status === 'salted' && !seen[it.id]) {
+        seen[it.id] = new Date(it.time || now).toISOString();
+        added++;
+      }
+    }
+  } catch (e) {
+    console.error(`${feed.id} failed: ${e.message}`);
+  }
+}
+console.log(`${added} newly salted stretches, ${Object.keys(season.salted).length} interstate stretches total this season`);
 if (added || !season.updated) {
   season.updated = now.toISOString();
   writeFileSync(file, JSON.stringify(season, null, 1) + '\n');

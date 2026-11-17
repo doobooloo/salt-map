@@ -1,5 +1,5 @@
-import { FEEDS, STATE_NAMES, demoFeeds } from './feeds.js';
-import { pathsLength, saltedChunks, chunkKey, TRUCK_FRESH_MS } from './geo.js';
+import { FEEDS, LOCAL_FEEDS, STATE_NAMES, demoFeeds } from './feeds.js';
+import { pathsLength, saltedChunks, chunkKey, seasonOf, seasonStart, TRUCK_FRESH_MS } from './geo.js';
 
 const DEMO = new URLSearchParams(location.search).has('demo');
 const REFRESH_MS = 2 * 60e3;
@@ -9,6 +9,7 @@ const STATUS = {
   unsalted: { label: 'Not salted yet', color: '#d1495b', weight: 3 },
   nodata: { label: 'No public data from this state', color: '#9aa3ad', weight: 1.5 },
 };
+const SERVICED = { label: 'City street serviced by winter crew (salt not specified)', color: '#12a594' };
 
 // ---------- map ----------
 const map = L.map('map', { preferCanvas: true, zoomControl: false, minZoom: 3 }).setView([39.5, -96.5], 5);
@@ -113,13 +114,15 @@ function applyResults(results) {
 }
 
 // ---------- panel ----------
+const pct = (f) => (f > 0 && f < 0.001 ? '<0.1%' : `${(100 * f).toFixed(f < 0.1 && f ? 1 : 0)}%`);
 const count = (r) => r.items.filter((t) => !t.trail).length;
 function renderPanel(results) {
   const tot = { salted: 0, unsalted: 0, nodata: 0 };
   for (const c of chunks) tot[c.status] += c.len;
   const all = tot.salted + tot.unsalted + tot.nodata;
   $('legend').innerHTML = Object.entries(STATUS).map(([k, s]) =>
-    `<li><span class="swatch" style="background:${s.color}"></span><span>${s.label}</span><span class="pct">${(100 * tot[k] / all).toFixed(tot[k] / all < 0.1 && tot[k] ? 1 : 0)}%</span></li>`).join('');
+    `<li><span class="swatch" style="background:${s.color}"></span><span>${s.label}</span><span class="pct">${pct(tot[k] / all)}</span></li>`).join('')
+    + `<li><span class="swatch" style="background:${SERVICED.color}"></span><span>${SERVICED.label}</span></li>`;
 
   const states = [...new Set(FEEDS.map((f) => f.state))];
   $('states').innerHTML = states.map((st) => {
@@ -133,8 +136,8 @@ function renderPanel(results) {
       : feeds.some((r) => r.ok) ? 'Plow positions only – salting not reported' : 'Feed unavailable';
     return `<div class="state"><button data-state="${st}" title="Zoom to ${STATE_NAMES[st]}">${STATE_NAMES[st]}</button>
       <div class="bar">${bar}</div><div class="sum">${summary}</div>
-      ${feeds.map((r) => `<div class="feed ${r.ok ? 'ok' : 'err'}"><a href="${r.feed.link}" target="_blank" rel="noopener">${esc(r.feed.name)}</a>
-        <span>${r.ok ? `${count(r).toLocaleString()} ${r.feed.kind === 'trucks' ? 'truck' : 'treated segment'}${count(r) === 1 ? '' : 's'} now` : `failed: ${esc(r.error)}`}</span></div>`).join('')}</div>`;
+      <details><summary>Sources</summary>${feeds.map((r) => `<div class="feed ${r.ok ? 'ok' : 'err'}"><a href="${r.feed.link}" target="_blank" rel="noopener">${esc(r.feed.name)}</a>
+        <span>${r.ok ? `${count(r).toLocaleString()} ${r.feed.kind === 'trucks' ? 'truck' : 'treated segment'}${count(r) === 1 ? '' : 's'} now` : `failed: ${esc(r.error)}`}</span></div>`).join('')}</details></div>`;
   }).join('');
   $('states').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => zoomTo(b.dataset.state)));
 
@@ -150,6 +153,80 @@ function zoomTo(st) {
   const b = L.latLngBounds([]);
   for (const c of cs) b.extend(c.layer.getBounds());
   map.fitBounds(b, { padding: [30, 30] });
+}
+
+// ---------- city streets ----------
+// Each city feed is fetched the first time the map is zoomed in near it.
+const CITY_ZOOM = 10;
+const cityLayer = L.layerGroup();
+const cityPins = L.layerGroup();
+const cityState = new Map(); // feed.id -> { status: 'idle'|'loading'|'ok'|'err', counts }
+const cityRenderer = L.canvas({ padding: 0.3, tolerance: 5 });
+
+function cityPopup(feed, it) {
+  const st = it.status === 'salted' ? STATUS.salted : it.status === 'serviced' ? { ...SERVICED, label: 'Serviced by winter crew (salt not specified)' } : STATUS.unsalted;
+  return `<div class="pop"><strong>${esc(it.name)}</strong> · ${esc(feed.place)}<br><span class="dot" style="background:${st.color}"></span>${st.label}`
+    + (it.time ? `<br><small>${it.status === 'salted' ? 'First recorded' : 'Last serviced'} ${day(it.time)}${it.detail ? ` · ${esc(it.detail)}` : ''}</small>` : '') + '</div>';
+}
+
+async function loadCity(feed) {
+  const st = cityState.get(feed.id);
+  if (st.status !== 'idle') return;
+  st.status = 'loading';
+  renderCities();
+  try {
+    const items = await feed.load(seasonStart(season.season || seasonOf()));
+    const recorded = (season.local && season.local[feed.id]) || {};
+    st.counts = { salted: 0, serviced: 0, none: 0 };
+    for (const it of items) {
+      if (recorded[it.id] && it.status !== 'salted') Object.assign(it, { status: 'salted', time: Date.parse(recorded[it.id]), detail: '' });
+      st.counts[it.status]++;
+      const color = it.status === 'salted' ? STATUS.salted.color : it.status === 'serviced' ? SERVICED.color : STATUS.unsalted.color;
+      L.polyline(it.paths.map((p) => p.map(([x, y]) => [y, x])), { renderer: cityRenderer, color, weight: it.status === 'none' ? 1.5 : 2.5, opacity: it.status === 'none' ? 0.55 : 0.9 })
+        .bindPopup(() => cityPopup(feed, it)).addTo(cityLayer);
+    }
+    st.status = 'ok';
+  } catch (e) {
+    console.warn(feed.id, e);
+    st.status = 'err';
+    st.error = e.message || String(e);
+  }
+  renderCities();
+}
+
+function updateCities() {
+  const zoomedIn = map.getZoom() >= CITY_ZOOM;
+  if (zoomedIn) { map.removeLayer(cityPins); map.addLayer(cityLayer); } else { map.removeLayer(cityLayer); map.addLayer(cityPins); }
+  if (!zoomedIn || DEMO) return;
+  const b = map.getBounds().pad(0.3);
+  for (const feed of LOCAL_FEEDS) if (b.contains(feed.center)) loadCity(feed);
+}
+
+function renderCities() {
+  $('cities').innerHTML = LOCAL_FEEDS.map((feed) => {
+    const st = cityState.get(feed.id);
+    const c = st.counts;
+    const txt = st.status === 'idle' ? (feed.material ? 'Reports salting' : 'Reports vehicle passes only')
+      : st.status === 'loading' ? 'Loading…'
+      : st.status === 'err' ? `Failed: ${esc(st.error)}`
+      : feed.material ? `${c.salted.toLocaleString()} of ${(c.salted + c.none).toLocaleString()} streets salted this season`
+      : c.serviced ? `${c.serviced.toLocaleString()} streets serviced this season` : 'No streets serviced yet this season';
+    return `<div class="city"><button data-city="${feed.id}">${esc(feed.place)}</button><span class="${st.status === 'err' ? 'bad' : ''}">${txt}</span></div>`;
+  }).join('');
+  $('cities').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    map.setView(LOCAL_FEEDS.find((f) => f.id === b.dataset.city).center, 12);
+  }));
+}
+
+function initCities() {
+  for (const feed of LOCAL_FEEDS) {
+    cityState.set(feed.id, { status: 'idle' });
+    L.marker(feed.center, { icon: L.divIcon({ className: 'citypin', html: `<span>${esc(feed.place.split(',')[0])}</span>`, iconSize: null }) })
+      .on('click', () => map.setView(feed.center, 12)).addTo(cityPins);
+  }
+  renderCities();
+  map.on('zoomend moveend', updateCities);
+  updateCities();
 }
 
 // ---------- loading ----------
@@ -182,6 +259,7 @@ async function init() {
   }
   drawRoads();
   await refresh();
+  initCities();
   setInterval(refresh, REFRESH_MS);
   window.saltMap = { map, chunks: () => chunks, zoomTo };
 }

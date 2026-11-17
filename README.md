@@ -37,11 +37,19 @@ started is not known.
 There is no national dataset of road salting. The map reads the public feeds
 that exist, straight from the browser, and refreshes every two minutes:
 
-| State | Feed | Says whether material was applied? |
+| State | Source | Says whether material was applied? |
 | --- | --- | --- |
-| Iowa | Winter Storm Analysis, past 48 h (road segments with passes and material quantities) | Yes |
-| Iowa | Snow plow truck locations (live, with material and rate) | Yes |
-| Utah | Snow plow locations (live) | No, positions only |
+| Iowa | Iowa DOT winter storm analysis (48 h segments) and live truck locations | Yes |
+| Indiana, Kansas, Nebraska | 511 plow trails (Castle Rock platform) | Yes, from the truck icon (Nebraska unconfirmed: empty when added) |
+| Kentucky | KYTC snow and ice treated roads | Yes (untested: empty when added) |
+| Utah, Minnesota, Maryland, Kentucky trucks | Live plow positions | No, positions only |
+
+City streets (shown when zoomed in):
+
+| City | Source | Meaning |
+| --- | --- | --- |
+| Cincinnati, OH | City street treatment status | Salted / pre-treated, per street |
+| Kansas City MO, Akron OH, Portage MI, Bowling Green OH, Syracuse NY, Washington DC | Esri Winter Weather Operations "last serviced" | A winter crew vehicle pass; salt vs plow is not specified. Events named as tests or dry runs are ignored |
 
 Every other state is grey. Road geometry comes from the USDOT/BTS National
 Highway System layer, pre-processed into `data/interstates.json` by
@@ -49,7 +57,7 @@ Highway System layer, pre-processed into `data/interstates.json` by
 
 ## Adding a state
 
-Add an entry to `js/feeds.js`. A feed returns either road `segments` or
+Add an entry to `FEEDS` (state highways) or `LOCAL_FEEDS` (city streets) in `js/feeds.js`. A feed returns either road `segments` or
 `trucks` in the normalized shape described at the top of that file; the map
 matches them to the interstate geometry. Set `material: true` only if the feed
 actually reports salt/brine application.

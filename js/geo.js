@@ -109,3 +109,6 @@ export function seasonOf(d = new Date()) {
   const y = d.getUTCMonth() >= 9 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;
   return `${y}-${String((y + 1) % 100).padStart(2, '0')}`;
 }
+
+// Start of a season ("2026-27") as epoch ms: 1 October, UTC.
+export const seasonStart = (name) => Date.UTC(+name.slice(0, 4), 9, 1);
