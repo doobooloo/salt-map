@@ -228,6 +228,30 @@ export const FEEDS = [
       }));
     },
   },
+  carsFeed({ state: 'CO', agency: 'CDOT', host: 'cotg.carsprogram.org', site: 'https://www.cotrip.org' }),
+  {
+    id: 'ar-segments',
+    state: 'AR',
+    kind: 'segments',
+    material: true,
+    name: 'Arkansas ARDOT – Pretreatment routes',
+    about: 'Highway segments with the pretreatment solution applied.',
+    link: 'https://www.idrivearkansas.com',
+    async load() {
+      const res = await fetch('https://layers.idrivearkansas.com/pretreat_routes.geojson');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      return (data.features || [])
+        .filter((f) => f.geometry && f.properties.route_type === 'Interstate')
+        .filter((f) => f.properties.completed || (f.properties.solution && f.properties.solution !== 'None'))
+        .map((f) => {
+          const p = f.properties;
+          return { paths: f.geometry.type === 'MultiLineString' ? f.geometry.coordinates : [f.geometry.coordinates], status: 'treated',
+            time: Date.parse(p.completed_date || p.last_update) || null,
+            detail: `Pretreatment${p.solution && p.solution !== 'None' ? `: ${p.solution}` : ' completed'}` };
+        });
+    },
+  },
 ];
 
 // ---------- city / local street feeds ----------
@@ -246,6 +270,12 @@ function wwoFeed({ id, place, state, center, url, link }) {
     id, place, state, center, link, material: false, record: false,
     name: `${place} – streets last serviced`,
     async load(since) {
+      // Segments keep the id of the event that last serviced them; drop tests and dry runs.
+      const testEvents = new Set();
+      try {
+        const events = await arcgisQuery(url.replace(/\/0$/, '/3'), { outFields: 'eventid,eventname', returnGeometry: 'false' }, 3);
+        for (const e of events) if (TEST_EVENT.test(e.attributes.eventname || '')) testEvents.add(e.attributes.eventid);
+      } catch (e) { /* this city publishes no event table */ }
       const feats = await arcgisQuery(url, {
         where: `lastserviced >= TIMESTAMP '${sqlDate(since)}'`,
         outFields: '*',
@@ -253,11 +283,15 @@ function wwoFeed({ id, place, state, center, url, link }) {
         geometryPrecision: '5',
       }, 15);
       return feats
-        .filter((f) => f.geometry && f.geometry.paths && !TEST_EVENT.test(f.attributes.eventname || ''))
+        .filter((f) => f.geometry && f.geometry.paths)
+        .filter((f) => !TEST_EVENT.test(f.attributes.eventname || f.attributes.eventname_Any || '') && !testEvents.has(f.attributes.eventid))
         .map((f) => {
           const a = f.attributes;
+          const what = a.servicestatus && !/not serviced|reset/i.test(a.servicestatus) ? a.servicestatus : '';
+          const salted = /de-?ic|anti-?ic|salt|brin/i.test(what);
+          const passes = a.passes ? `${a.passes} vehicle pass${a.passes === 1 ? '' : 'es'}` : '';
           return { id: String(a.snowroutesegmentid || a.OBJECTID || a.objectid), name: a.roadname || 'Street', paths: f.geometry.paths,
-            status: 'serviced', time: a.lastserviced, detail: a.passes ? `${a.passes} vehicle pass${a.passes === 1 ? '' : 'es'}` : '' };
+            status: salted ? 'salted' : 'serviced', time: a.lastserviced, detail: [what, passes].filter(Boolean).join(', ') };
         });
     },
   };
@@ -294,6 +328,14 @@ export const LOCAL_FEEDS = [
     url: 'https://services6.arcgis.com/bdPqSfflsdgFRVVM/arcgis/rest/services/EventSnowRoutes_dashboard_0eaac62ac5fc4865b58d5ce127f5841f/FeatureServer/0' }),
   wwoFeed({ id: 'washington-dc', place: 'Washington, DC', state: 'DC', center: [38.9, -77.03],
     url: 'https://services.arcgis.com/neT9SoYxizqTHZPH/arcgis/rest/services/EventSnowRoutes_dashboard_f01daf9a8523494aaa87a041ce02028f/FeatureServer/0' }),
+  wwoFeed({ id: 'milwaukee', place: 'Milwaukee, WI', state: 'WI', center: [43.04, -87.91],
+    url: 'https://services1.arcgis.com/5ly0cVV70qsN8Soc/arcgis/rest/services/SnowRoutes_PublicView/FeatureServer/0' }),
+  wwoFeed({ id: 'sarpy-county', place: 'Sarpy County, NE', state: 'NE', center: [41.15, -96.04],
+    url: 'https://services.arcgis.com/OiG7dbwhQEWoy77N/arcgis/rest/services/SnowRoutes_public_eb37385e0842450a93a46aae44a69298/FeatureServer/0' }),
+  wwoFeed({ id: 'bozeman', place: 'Bozeman, MT', state: 'MT', center: [45.68, -111.04],
+    url: 'https://services3.arcgis.com/f4hk1qcfxRJ0L2BU/arcgis/rest/services/Winter_Operations_public_0e474e29fe084c908647ee65df2bee92/FeatureServer/0' }),
+  wwoFeed({ id: 'anchorage', place: 'Anchorage, AK', state: 'AK', center: [61.19, -149.87],
+    url: 'https://services2.arcgis.com/Ce3DhLRthdwbHlfF/arcgis/rest/services/SnowRoutes_20241120_ReadOnly_View/FeatureServer/0' }),
 ];
 
 export const STATE_NAMES = {

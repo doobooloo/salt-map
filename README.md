@@ -40,7 +40,8 @@ that exist, straight from the browser, and refreshes every two minutes:
 | State | Source | Says whether material was applied? |
 | --- | --- | --- |
 | Iowa | Iowa DOT winter storm analysis (48 h segments) and live truck locations | Yes |
-| Indiana, Kansas, Nebraska | 511 plow trails (Castle Rock platform) | Yes, from the truck icon (Nebraska unconfirmed: empty when added) |
+| Indiana, Kansas, Colorado, Nebraska | 511 plow trails (Castle Rock platform) | Yes, from the truck icon (Nebraska unconfirmed: empty when added) |
+| Arkansas | ARDOT pretreatment routes | Yes (untested: all segments idle when added) |
 | Kentucky | KYTC snow and ice treated roads | Yes (untested: empty when added) |
 | Utah, Minnesota, Maryland, Kentucky trucks | Live plow positions | No, positions only |
 
@@ -49,7 +50,7 @@ City streets (shown when zoomed in):
 | City | Source | Meaning |
 | --- | --- | --- |
 | Cincinnati, OH | City street treatment status | Salted / pre-treated, per street |
-| Kansas City MO, Akron OH, Portage MI, Bowling Green OH, Syracuse NY, Washington DC | Esri Winter Weather Operations "last serviced" | A winter crew vehicle pass; salt vs plow is not specified. Events named as tests or dry runs are ignored |
+| Kansas City MO, Akron OH, Portage MI, Bowling Green OH, Syracuse NY, Washington DC, Milwaukee WI, Sarpy County NE, Bozeman MT, Anchorage AK | Esri Winter Weather Operations "last serviced" | A winter crew vehicle pass; shown as salted only if the city's status says de-icing/anti-icing. Events named as tests or dry runs are ignored |
 
 Every other state is grey. Road geometry comes from the USDOT/BTS National
 Highway System layer, pre-processed into `data/interstates.json` by
