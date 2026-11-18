@@ -50,7 +50,12 @@ City streets (shown when zoomed in):
 | City | Source | Meaning |
 | --- | --- | --- |
 | Cincinnati, OH | City street treatment status | Salted / pre-treated, per street |
-| Kansas City MO, Akron OH, Portage MI, Bowling Green OH, Syracuse NY, Washington DC, Milwaukee WI, Sarpy County NE, Bozeman MT, Anchorage AK | Esri Winter Weather Operations "last serviced" | A winter crew vehicle pass; shown as salted only if the city's status says de-icing/anti-icing. Events named as tests or dry runs are ignored |
+| Pittsburgh, PA | City truck GPS tracks while salting | Salted routes. The city keeps about 12 hours, so the recorder archives the tracks in `data/local/pittsburgh.json` |
+| Philadelphia, PA | PlowPHL "treated" streets, latest storm | A plow or salt vehicle pass. Ignored when fewer than 5 vehicles are in the layer (pre-season dry runs). Archived in `data/local/` |
+| Columbus, Dublin, Westerville OH | ETCH tracker (Columbus "Warrior Watch") | Last serviced time per street, counted only inside a declared snow event. Archived in `data/local/` |
+| New York, NY | PlowNYC "last visited" (NYC Open Data) | A sanitation snow vehicle pass, on highways and critical routes only (`data/nyc_streets.json`, rebuilt by `scripts/build_nyc_streets.py`). Archived in `data/local/` |
+| Rochester, NY | PlowTrax | Last plow pass per street; test vehicles ignored |
+| Kansas City MO, Akron OH, Toledo OH, Kettering OH, Portage MI, Bowling Green OH, Syracuse NY, Washington DC, Milwaukee WI, Sarpy County NE, Bozeman MT, Anchorage AK | Esri Winter Weather Operations "last serviced" | A winter crew vehicle pass; shown as salted only if the city's status says de-icing/anti-icing. Events named as tests or dry runs are ignored |
 
 Every other state is grey. Road geometry comes from the USDOT/BTS National
 Highway System layer, pre-processed into `data/interstates.json` by

@@ -350,6 +350,28 @@ function etchFeed({ id, place, state, center, org, eventTypeId, link }) {
   };
 }
 
+// Local wall-clock time in New York ("2026-02-25T14:17:00.000") -> epoch ms.
+function easternToMs(str) {
+  const asUtc = Date.parse(`${str.slice(0, 19)}Z`);
+  const shown = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+    .formatToParts(new Date(asUtc)).reduce((o, p) => ({ ...o, [p.type]: +p.value }), {});
+  return asUtc + (asUtc - Date.UTC(shown.year, shown.month - 1, shown.day, shown.hour, shown.minute, shown.second));
+}
+const easternStamp = (ms) => {
+  // inverse of easternToMs, good to the hour, for query bounds
+  const d = new Date(ms - 5 * HOUR);
+  return d.toISOString().slice(0, 19);
+};
+
+// Files that ship with the site, readable from the browser and from the Node recorder alike.
+async function siteJson(path) {
+  const url = new URL(`../${path}`, import.meta.url);
+  if (url.protocol === 'file:') return JSON.parse((await import('node:fs')).readFileSync(url));
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export const LOCAL_FEEDS = [
   {
     id: 'cincinnati', place: 'Cincinnati, OH', state: 'OH', center: [39.14, -84.51], material: true, record: true,
@@ -431,6 +453,49 @@ export const LOCAL_FEEDS = [
     url: 'https://services7.arcgis.com/AujU6g0cAkL5JYsn/arcgis/rest/services/Winter_Operations_public_8364b3cb987c4a85bfc6265073e2a647/FeatureServer/0' }),
   wwoFeed({ id: 'bowling-green', place: 'Bowling Green, OH', state: 'OH', center: [41.375, -83.65],
     url: 'https://services1.arcgis.com/2guSauYVDQrap3kI/arcgis/rest/services/Winter_Operations_public_e6027c15269544358b4a937dbb4d8879/FeatureServer/0' }),
+  {
+    // PlowNYC: last time a sanitation vehicle on snow duty passed each street (plows and spreaders alike).
+    // Geometry for highways and critical routes is prebuilt by scripts/build_nyc_streets.py.
+    id: 'new-york', place: 'New York, NY', state: 'NY', center: [40.73, -73.95], material: false, archive: 'streets',
+    name: 'New York City – streets visited by snow vehicles (PlowNYC)',
+    link: 'https://data.cityofnewyork.us/d/rmhc-afj9',
+    async load(since) {
+      const api = 'https://data.cityofnewyork.us/resource/rmhc-afj9.json';
+      const q = async (params) => {
+        const res = await fetch(`${api}?${new URLSearchParams(params)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      };
+      const from = easternStamp(since);
+      const [{ s: snapshot } = {}] = await q({ $select: 'max(snapshot) as s', $where: `snapshot > '${from}'` });
+      if (!snapshot) return [];
+      const rows = await q({ $select: 'physical_id,last_visited', $where: `snapshot = '${snapshot}' and last_visited > '${from}'`, $limit: 200000 });
+      if (!rows.length) return [];
+      const streets = await siteJson('data/nyc_streets.json');
+      const out = [];
+      for (const r of rows) {
+        const st = streets[r.physical_id];
+        if (st) out.push({ id: r.physical_id, name: st[0] || 'Street', paths: [st[1]], status: 'serviced', time: easternToMs(r.last_visited), detail: '' });
+      }
+      return out;
+    },
+  },
+  {
+    // Rochester PlowTrax: most recent plow pass per street. Times persist across seasons; test vehicles are dropped.
+    id: 'rochester', place: 'Rochester, NY', state: 'NY', center: [43.16, -77.61], material: false, record: false,
+    name: 'Rochester – streets last plowed (PlowTrax)',
+    link: 'https://gis.cityofrochester.gov/geoevent/rest/services/PlowTrax/StreetActivityQuery/MapServer/0',
+    async load(since) {
+      const feats = await arcgisQuery('https://gis.cityofrochester.gov/geoevent/rest/services/PlowTrax/StreetActivityQuery/MapServer/0', {
+        where: `DateTimeStamp >= TIMESTAMP '${sqlDate(since)}'`,
+        outFields: 'LINKID,ST_NAME,DateTimeStamp,VehicleName', maxAllowableOffset: '0.00005', geometryPrecision: '5',
+      }, 5);
+      return feats
+        .filter((f) => f.geometry && f.geometry.paths && f.attributes.VehicleName && !TEST_EVENT.test(f.attributes.VehicleName))
+        .map((f) => ({ id: String(f.attributes.LINKID), name: f.attributes.ST_NAME || 'Street', paths: f.geometry.paths,
+          status: 'serviced', time: f.attributes.DateTimeStamp, detail: '' }));
+    },
+  },
   wwoFeed({ id: 'syracuse', place: 'Syracuse, NY', state: 'NY', center: [43.05, -76.15],
     url: 'https://services6.arcgis.com/bdPqSfflsdgFRVVM/arcgis/rest/services/EventSnowRoutes_dashboard_0eaac62ac5fc4865b58d5ce127f5841f/FeatureServer/0' }),
   wwoFeed({ id: 'washington-dc', place: 'Washington, DC', state: 'DC', center: [38.9, -77.03],
