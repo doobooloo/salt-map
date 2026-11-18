@@ -268,7 +268,7 @@ const PHL_MIN_VEHICLES = 5;
 const TEST_EVENT = /test|dry.?run|training|drill|demo/i;
 
 // Esri "Winter Weather Operations" solution: streets with the last time a vehicle serviced them.
-function wwoFeed({ id, place, state, center, url, link }) {
+function wwoFeed({ id, place, state, center, url, link, events, nameField = 'roadname' }) {
   return {
     id, place, state, center, link, material: false, record: false,
     name: `${place} – streets last serviced`,
@@ -279,6 +279,14 @@ function wwoFeed({ id, place, state, center, url, link }) {
         const events = await arcgisQuery(url.replace(/\/0$/, '/3'), { outFields: 'eventid,eventname', returnGeometry: 'false' }, 3);
         for (const e of events) if (TEST_EVENT.test(e.attributes.eventname || '')) testEvents.add(e.attributes.eventid);
       } catch (e) { /* this city publishes no event table */ }
+      // Some cities keep events in a separate table with no id on the streets: match tests by time instead.
+      const testSpans = [];
+      if (events) {
+        for (const e of await arcgisQuery(events, { outFields: 'eventname,eventstart,eventend', returnGeometry: 'false' }, 3)) {
+          const a = e.attributes;
+          if (TEST_EVENT.test(a.eventname || '') && a.eventstart) testSpans.push([a.eventstart, a.eventend || a.eventstart + 24 * HOUR]);
+        }
+      }
       const feats = await arcgisQuery(url, {
         where: `lastserviced >= TIMESTAMP '${sqlDate(since)}'`,
         outFields: '*',
@@ -288,14 +296,56 @@ function wwoFeed({ id, place, state, center, url, link }) {
       return feats
         .filter((f) => f.geometry && f.geometry.paths)
         .filter((f) => !TEST_EVENT.test(f.attributes.eventname || f.attributes.eventname_Any || '') && !testEvents.has(f.attributes.eventid))
+        .filter((f) => !testSpans.some(([a, b]) => f.attributes.lastserviced >= a && f.attributes.lastserviced <= b))
         .map((f) => {
           const a = f.attributes;
           const what = a.servicestatus && !/not serviced|reset/i.test(a.servicestatus) ? a.servicestatus : '';
-          const salted = /de-?ic|anti-?ic|salt|brin/i.test(what);
+          const salted = /de-?ic|anti-?ic|salt|brin|spread/i.test(what);
           const passes = a.passes ? `${a.passes} vehicle pass${a.passes === 1 ? '' : 'es'}` : '';
-          return { id: String(a.snowroutesegmentid || a.OBJECTID || a.objectid), name: a.roadname || 'Street', paths: f.geometry.paths,
+          return { id: String(a.snowroutesegmentid || a.OBJECTID || a.objectid || a.FID), name: a[nameField] || 'Street', paths: f.geometry.paths,
             status: salted ? 'salted' : 'serviced', time: a.lastserviced, detail: [what, passes].filter(Boolean).join(', ') };
         });
+    },
+  };
+}
+
+// ETCH snow-plow trackers (Columbus "Warrior Watch", Dublin, Westerville): last time each street was serviced.
+// Times accrue during tests and summer work too, so only those inside a declared snow event count.
+function etchFeed({ id, place, state, center, org, eventTypeId, link }) {
+  const base = `https://api.etch.app/avl/${org}`;
+  const get = async (path) => {
+    const res = await fetch(`${base}/${path}?eventTypeId=${eventTypeId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  };
+  let roads; // street geometry is large and static: fetch once, and only when something has been serviced
+  return {
+    id, place, state, center, link, material: false, archive: 'streets',
+    name: `${place} – streets last serviced`,
+    async load(since) {
+      const t = await get('treatment');
+      if (!t.eventStart) return [];
+      const msgs = await get('messages').catch(() => ({}));
+      if ((msgs.msgs || []).some((m) => TEST_EVENT.test(m.text || ''))) return [];
+      const from = Math.max(since, t.eventStart * 1000);
+      const times = new Map((t.items || []).filter(([, ts]) => ts * 1000 >= from));
+      if (!times.size) return [];
+      roads ||= await get('centerlines');
+      const [ox, oy] = roads.origin, k = roads.scale || 1;
+      const out = [];
+      for (const f of roads.features) {
+        if (!times.has(f.id)) continue;
+        const path = [];
+        let x = 0, y = 0;
+        for (let i = 0; i + 1 < f.geo.length; i += 2) {
+          x += f.geo[i]; y += f.geo[i + 1];
+          // Web Mercator metres -> lon/lat
+          const mx = ox + x / k, my = oy + y / k;
+          path.push([+(mx / 6378137 * 180 / Math.PI).toFixed(5), +((2 * Math.atan(Math.exp(my / 6378137)) - Math.PI / 2) * 180 / Math.PI).toFixed(5)]);
+        }
+        out.push({ id: String(f.id), name: f.name || 'Street', paths: [path], status: 'serviced', time: times.get(f.id) * 1000, detail: f.pri || '' });
+      }
+      return out;
     },
   };
 }
@@ -366,6 +416,17 @@ export const LOCAL_FEEDS = [
     url: 'https://services.arcgis.com/4o5uMWTHuOhUVJPd/arcgis/rest/services/Winter_Operations_public_74e8930bc7fb4f2aa30a81bec12d50bc/FeatureServer/0' }),
   wwoFeed({ id: 'akron', place: 'Akron, OH', state: 'OH', center: [41.08, -81.52],
     url: 'https://services1.arcgis.com/8roChjXOF0iBhNoB/arcgis/rest/services/Winter_Operations_public_05170e26916845e88589beb76f4c667f/FeatureServer/0' }),
+  etchFeed({ id: 'columbus', place: 'Columbus, OH', state: 'OH', center: [39.98, -82.99], org: 'columbus', eventTypeId: 17,
+    link: 'https://warriorwatch.columbus.gov/' }),
+  etchFeed({ id: 'dublin', place: 'Dublin, OH', state: 'OH', center: [40.1, -83.13], org: 'dublin', eventTypeId: 5,
+    link: 'https://dublin.etch.app/' }),
+  etchFeed({ id: 'westerville', place: 'Westerville, OH', state: 'OH', center: [40.126, -82.93], org: 'westerville', eventTypeId: 7,
+    link: 'https://westerville.etch.app/' }),
+  wwoFeed({ id: 'toledo', place: 'Toledo, OH', state: 'OH', center: [41.66, -83.58], nameField: 'LSN',
+    url: 'https://services.arcgis.com/2snQ88YUjP9CNEbe/arcgis/rest/services/SnowRoutes_Public/FeatureServer/0',
+    events: 'https://services.arcgis.com/2snQ88YUjP9CNEbe/arcgis/rest/services/Operations_Management_8b0205eebdd1474faddc200f0d335af1/FeatureServer/1' }),
+  wwoFeed({ id: 'kettering', place: 'Kettering, OH', state: 'OH', center: [39.69, -84.15],
+    url: 'https://services1.arcgis.com/IDg0PVR55RzXuJ5Y/arcgis/rest/services/SnowRoutes_public_c4a94a6c3e5d4f888d22812916b110c4/FeatureServer/0' }),
   wwoFeed({ id: 'portage', place: 'Portage, MI', state: 'MI', center: [42.2, -85.59],
     url: 'https://services7.arcgis.com/AujU6g0cAkL5JYsn/arcgis/rest/services/Winter_Operations_public_8364b3cb987c4a85bfc6265073e2a647/FeatureServer/0' }),
   wwoFeed({ id: 'bowling-green', place: 'Bowling Green, OH', state: 'OH', center: [41.375, -83.65],
