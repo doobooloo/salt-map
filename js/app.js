@@ -175,7 +175,16 @@ async function loadCity(feed) {
   st.status = 'loading';
   renderCities();
   try {
-    const items = await feed.load(seasonStart(season.season || seasonOf()));
+    const since = seasonStart(season.season || seasonOf());
+    const items = await feed.load(since);
+    if (feed.archive) {
+      // Streets the recorder saw earlier this season that the city's feed has since dropped.
+      try {
+        const res = await fetch(`data/local/${feed.id}.json`, { cache: 'no-store' });
+        const live = new Set(items.map((it) => it.id));
+        if (res.ok) for (const it of await res.json()) if (!live.has(it.id) && it.time >= since) items.push(it);
+      } catch (e) { console.warn(feed.id, 'archive unavailable', e); }
+    }
     const recorded = (season.local && season.local[feed.id]) || {};
     st.counts = { salted: 0, serviced: 0, none: 0 };
     for (const it of items) {
@@ -209,6 +218,7 @@ function renderCities() {
     const txt = st.status === 'idle' ? (feed.material ? 'Reports salting' : 'Reports vehicle passes only')
       : st.status === 'loading' ? 'Loading…'
       : st.status === 'err' ? `Failed: ${esc(st.error)}`
+      : feed.archive ? (c.salted + c.serviced ? `${(c.salted + c.serviced).toLocaleString()} ${feed.archive === 'tracks' ? 'truck routes' : 'streets'} ${feed.material ? 'salted' : 'serviced'} this season` : `Nothing ${feed.material ? 'salted' : 'serviced'} yet this season`)
       : feed.material ? `${c.salted.toLocaleString()} of ${(c.salted + c.none).toLocaleString()} streets salted this season`
       : c.serviced ? `${c.serviced.toLocaleString()} streets serviced this season` : 'No streets serviced yet this season';
     return `<div class="city"><button data-city="${feed.id}">${esc(feed.place)}</button><span class="${st.status === 'err' ? 'bad' : ''}">${txt}</span></div>`;

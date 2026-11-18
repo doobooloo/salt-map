@@ -259,9 +259,12 @@ export const FEEDS = [
 // load(sinceMs) -> [{ id, name, paths, status: 'salted'|'serviced'|'none', time, detail }]
 //   salted:   the agency says salt/brine/pre-treatment went down
 //   serviced: a winter operations vehicle pass was logged, salt vs plow not specified
+// `archive` means the feed lists only recently treated streets, so the recorder keeps their geometry in
+// data/local/<id>.json ('streets': stable street ids; 'tracks': GPS tracks, de-duplicated by overlap).
 // `record: true` means the layer is reset between storms, so the season recorder must remember it.
 
 const sqlDate = (ms) => new Date(ms).toISOString().slice(0, 10) + ' 00:00:00';
+const PHL_MIN_VEHICLES = 5;
 const TEST_EVENT = /test|dry.?run|training|drill|demo/i;
 
 // Esri "Winter Weather Operations" solution: streets with the last time a vehicle serviced them.
@@ -313,6 +316,49 @@ export const LOCAL_FEEDS = [
         const salted = /salt|pretreat/i.test(a.STREETSTATUS || '') && (a.STREETDATE || 0) >= since;
         return { id: a.SNOWSTREETID, name: a.MAPLABEL || 'Street', paths: f.geometry.paths,
           status: salted ? 'salted' : 'none', time: salted ? a.STREETDATE : null, detail: salted ? a.STREETSTATUS : '' };
+      });
+    },
+  },
+  {
+    // GPS tracks of city trucks while salting. The city keeps only 12 hours, so the recorder archives them.
+    id: 'pittsburgh', place: 'Pittsburgh, PA', state: 'PA', center: [40.44, -79.99], material: true, archive: 'tracks',
+    name: 'Pittsburgh – salted truck tracks',
+    link: 'https://pghbridgis.pittsburghpa.gov/hosting/rest/services/Hosted/samsara_salted/FeatureServer/0',
+    async load(since) {
+      const feats = await arcgisQuery('https://pghbridgis.pittsburghpa.gov/hosting/rest/services/Hosted/samsara_salted/FeatureServer/0', {
+        outFields: 'segment_id,start_time,end_time', geometryPrecision: '5',
+      }, 5);
+      const seen = new Set();
+      const out = [];
+      for (const f of feats) {
+        const a = f.attributes;
+        const time = Date.parse(a.end_time || a.start_time);
+        if (!f.geometry || !f.geometry.paths || !(time >= since) || seen.has(a.segment_id)) continue;
+        seen.add(a.segment_id);
+        // The id's middle part is a rolling age bucket; drop it so a track keeps one id as it ages.
+        out.push({ id: `${String(a.segment_id).split('_')[0]}@${a.start_time}`, name: 'Salt truck route', paths: f.geometry.paths,
+          status: 'salted', time, detail: 'Salt truck GPS track' });
+      }
+      return out;
+    },
+  },
+  {
+    // Streets visited by a city plow/salt vehicle in the latest storm. Only visited streets are listed and the
+    // layer is overwritten by the next storm, so the recorder archives them.
+    id: 'philadelphia', place: 'Philadelphia, PA', state: 'PA', center: [39.98, -75.15], material: false, archive: 'streets',
+    name: 'Philadelphia – streets treated (PlowPHL)',
+    link: 'https://services.arcgis.com/fLeGjb7u4uXqeF9q/arcgis/rest/services/StreetSmartPHL/FeatureServer/9',
+    async load(since) {
+      const feats = await arcgisQuery('https://services.arcgis.com/fLeGjb7u4uXqeF9q/arcgis/rest/services/StreetSmartPHL/FeatureServer/9', {
+        outFields: 'seg_id,stname,l_hundred,time_visited_UTC,EquipmentNumber,StormYear,StormLetters',
+        maxAllowableOffset: '0.00005', geometryPrecision: '5',
+      }, 30);
+      // A real storm puts many vehicles out; a handful is a pre-season dry run.
+      if (new Set(feats.map((f) => f.attributes.EquipmentNumber)).size < PHL_MIN_VEHICLES) return [];
+      return feats.filter((f) => f.geometry && f.geometry.paths && f.attributes.time_visited_UTC >= since).map((f) => {
+        const a = f.attributes;
+        return { id: String(a.seg_id), name: [a.l_hundred, a.stname].filter(Boolean).join(' ') || 'Street', paths: f.geometry.paths,
+          status: 'serviced', time: a.time_visited_UTC, detail: `storm ${a.StormYear || ''}${(a.StormLetters || '').trim()}` };
       });
     },
   },

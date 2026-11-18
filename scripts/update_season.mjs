@@ -2,9 +2,9 @@
 // Records which interstate chunks have been salted at least once this season.
 // Run on a schedule (see .github/workflows/season.yml). Once a chunk is in
 // data/season.json it stays there until the next season starts on 1 October.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { FEEDS, LOCAL_FEEDS } from '../js/feeds.js';
-import { saltedChunks, chunkKey, seasonOf, seasonStart } from '../js/geo.js';
+import { saltedChunks, chunkKey, seasonOf, seasonStart, samplePaths } from '../js/geo.js';
 
 const root = new URL('..', import.meta.url);
 const file = new URL('data/season.json', root);
@@ -43,6 +43,39 @@ for (const feed of LOCAL_FEEDS.filter((f) => f.record)) {
         seen[it.id] = new Date(it.time || now).toISOString();
         added++;
       }
+    }
+  } catch (e) {
+    console.error(`${feed.id} failed: ${e.message}`);
+  }
+}
+// City feeds that list only recently treated streets: keep the geometry too.
+const CELL = 0.0003; // ~30 m
+const cellsOf = (paths) => samplePaths(paths, 25).map(([x, y]) => `${Math.round(x / CELL)},${Math.round(y / CELL)}`);
+for (const feed of LOCAL_FEEDS.filter((f) => f.archive)) {
+  try {
+    const dir = new URL('data/local/', root);
+    const f = new URL(`${feed.id}.json`, dir);
+    const since = seasonStart(season.season);
+    const kept = existsSync(f) ? JSON.parse(readFileSync(f)).filter((it) => it.time >= since) : [];
+    const ids = new Set(kept.map((it) => it.id));
+    const covered = new Set(feed.archive === 'tracks' ? kept.flatMap((it) => cellsOf(it.paths)) : []);
+    let n = 0;
+    for (const it of await feed.load(since)) {
+      if (it.status === 'none' || ids.has(it.id)) continue;
+      if (feed.archive === 'tracks') {
+        // Skip a track that only repeats streets already archived.
+        const cells = cellsOf(it.paths);
+        if (cells.filter((c) => covered.has(c)).length >= 0.9 * cells.length) continue;
+        for (const c of cells) covered.add(c);
+      }
+      ids.add(it.id);
+      kept.push({ ...it, paths: it.paths.map((p) => p.map(([x, y]) => [+x.toFixed(5), +y.toFixed(5)])) });
+      n++;
+    }
+    if (n) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(f, JSON.stringify(kept) + '\n');
+      added += n;
     }
   } catch (e) {
     console.error(`${feed.id} failed: ${e.message}`);
